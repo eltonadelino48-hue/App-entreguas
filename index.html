@@ -1,15 +1,4 @@
 <!DOCTYPE html>
-<html lang="en">
-
-  <head>
-    <meta charset="UTF-8">
-    <title>igas</title>
-    
-
-  </head>
-    
-  <body>
-  <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
@@ -23,7 +12,7 @@
             font-family: 'Inter', sans-serif;
         }
         #video-container.placeholder::before {
-            content: 'A câmera está desligada. Toque em "Ligar Câmera" para começar.';
+            content: 'A câmara está desligada. Toque em "Ligar Câmara" para começar.';
             position: absolute;
             top: 50%;
             left: 50%;
@@ -40,31 +29,37 @@
     <div class="container mx-auto p-4 max-w-2xl">
         <header class="text-center my-6">
             <h1 class="text-3xl font-bold text-gray-900">Otimizador de Entregas</h1>
-            <p class="text-gray-600 mt-2">Aponte a câmera para o endereço, escaneie e organize sua rota.</p>
+            <p class="text-gray-600 mt-2">Aponte a câmara para o endereço, digitalize e organize a sua rota.</p>
         </header>
 
         <main>
+            <!-- Secção da Câmara -->
             <section class="bg-white p-6 rounded-2xl shadow-lg mb-6">
                 <div id="video-container" class="relative w-full aspect-video bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-200 placeholder">
                     <video id="video" class="w-full h-full object-cover" autoplay playsinline></video>
                 </div>
-                <div class="flex flex-col sm:flex-row gap-4 mt-6">
-                    <button id="toggle-camera-btn" class="w-full bg-indigo-600 text-white font-semibold py-3 px-4 rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-transform transform hover:scale-105">
-                        Ligar Câmera
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 mt-6">
+                    <button id="toggle-camera-btn" class="col-span-2 sm:col-span-1 bg-indigo-600 text-white font-semibold py-3 px-4 rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-transform transform hover:scale-105">
+                        Ligar Câmara
                     </button>
-                    <button id="scan-btn" class="w-full bg-emerald-500 text-white font-semibold py-3 px-4 rounded-lg shadow-md hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 transition-transform transform hover:scale-105" disabled>
-                        Escanear Endereço
+                    <button id="switch-camera-btn" class="bg-gray-700 text-white font-semibold py-3 px-4 rounded-lg shadow-md hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-600 focus:ring-offset-2 transition-transform transform hover:scale-105" disabled>
+                        Trocar Câmara
+                    </button>
+                    <button id="scan-btn" class="col-span-2 sm:col-span-1 bg-emerald-500 text-white font-semibold py-3 px-4 rounded-lg shadow-md hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 transition-transform transform hover:scale-105" disabled>
+                        Digitalizar Endereço
                     </button>
                 </div>
             </section>
             
+            <!-- Secção de Status e Resultados -->
             <section id="status-section" class="bg-white p-6 rounded-2xl shadow-lg mb-6 text-center hidden">
                  <div id="spinner" class="hidden animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto mb-4"></div>
                  <p id="status-text" class="text-gray-600 font-medium"></p>
             </section>
 
+            <!-- Secção da Lista de Endereços -->
             <section class="bg-white p-6 rounded-2xl shadow-lg">
-                <h2 class="text-2xl font-bold mb-4 border-b pb-2">Endereços Escaneados</h2>
+                <h2 class="text-2xl font-bold mb-4 border-b pb-2">Endereços Digitalizados</h2>
                 <div id="address-list" class="space-y-4">
                     <p id="empty-list-msg" class="text-gray-500">Nenhum endereço na lista ainda.</p>
                 </div>
@@ -73,84 +68,133 @@
     </div>
 
     <script>
+        // Elementos do DOM
         const video = document.getElementById('video');
         const videoContainer = document.getElementById('video-container');
         const scanBtn = document.getElementById('scan-btn');
         const toggleCameraBtn = document.getElementById('toggle-camera-btn');
+        const switchCameraBtn = document.getElementById('switch-camera-btn');
         const addressListDiv = document.getElementById('address-list');
         const emptyListMsg = document.getElementById('empty-list-msg');
         const statusSection = document.getElementById('status-section');
         const statusText = document.getElementById('status-text');
         const spinner = document.getElementById('spinner');
 
+        // Estado da aplicação
         let stream = null;
         let isCameraOn = false;
         const addresses = new Map();
+        let videoDevices = [];
+        let currentDeviceIndex = 0;
+
+        // --- Funções de Inicialização ---
+
+        async function getCameraDevices() {
+            if (!navigator.mediaDevices?.enumerateDevices) {
+                console.log("enumerateDevices() not supported.");
+                return;
+            }
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                videoDevices = devices.filter(device => device.kind === 'videoinput');
+                // Ativa o botão de troca se houver mais de uma câmara
+                switchCameraBtn.disabled = videoDevices.length <= 1;
+            } catch (err) {
+                console.error("Error enumerating devices:", err);
+            }
+        }
 
         let worker;
         async function initializeWorker() {
-            updateStatus('Carregando modelo de leitura...', false);
+            updateStatus('A carregar modelo de leitura...', false);
             worker = await Tesseract.createWorker('por', 1, {
                 logger: m => {
                     if (m.status === 'recognizing text') {
-                        updateStatus(`Lendo texto... ${Math.round(m.progress * 100)}%`, true);
+                        updateStatus(`A ler texto... ${Math.round(m.progress * 100)}%`, true);
                     }
                 }
             });
-            updateStatus('Pronto para escanear!', false);
+            updateStatus('Pronto para digitalizar!', false);
             statusSection.classList.add('hidden');
         }
-        initializeWorker();
 
-        async function startCamera() {
+        // Inicializa tudo quando a página carrega
+        (async () => {
+            await getCameraDevices();
+            await initializeWorker();
+        })();
+
+
+        // --- Funções da Câmara ---
+
+        async function startCamera(deviceId = null) {
+            if (isCameraOn) { // Para a câmara atual antes de iniciar uma nova
+                stopCamera(true);
+            }
+
+            const constraints = {
+                video: {}
+            };
+            if (deviceId) {
+                constraints.video.deviceId = { exact: deviceId };
+            } else {
+                constraints.video.facingMode = 'environment';
+            }
+
             try {
-                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                    stream = await navigator.mediaDevices.getUserMedia({ 
-                        video: { 
-                            facingMode: 'environment'
-                        } 
-                    });
-                    video.srcObject = stream;
-                    video.play();
-                    isCameraOn = true;
-                    scanBtn.disabled = false;
-                    toggleCameraBtn.textContent = 'Desligar Câmera';
-                    toggleCameraBtn.classList.replace('bg-indigo-600', 'bg-red-600');
-                    toggleCameraBtn.classList.replace('hover:bg-indigo-700', 'hover:bg-red-700');
-                    videoContainer.classList.remove('placeholder');
-                    statusSection.classList.add('hidden');
-                }
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                video.play();
+                isCameraOn = true;
+                scanBtn.disabled = false;
+                toggleCameraBtn.textContent = 'Desligar Câmara';
+                toggleCameraBtn.classList.replace('bg-indigo-600', 'bg-red-600');
+                videoContainer.classList.remove('placeholder');
             } catch (error) {
-                console.error('Erro ao acessar a câmera:', error);
-                if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-                    updateStatus('Acesso à câmera negado. Verifique as permissões da câmera para este site nas configurações do seu navegador.', false);
-                } else {
-                    updateStatus('Não foi possível acessar a câmera. Verifique se o dispositivo tem uma câmera e se ela não está sendo usada por outro aplicativo.', false);
-                }
+                handleCameraError(error);
             }
         }
 
-        function stopCamera() {
+        function stopCamera(isSwitching = false) {
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
             }
-            video.srcObject = null;
             isCameraOn = false;
-            scanBtn.disabled = true;
-            toggleCameraBtn.textContent = 'Ligar Câmera';
-            toggleCameraBtn.classList.replace('bg-red-600', 'bg-indigo-600');
-            toggleCameraBtn.classList.replace('hover:bg-red-700', 'hover:bg-indigo-700');
-            videoContainer.classList.add('placeholder');
+            if (!isSwitching) {
+                video.srcObject = null;
+                scanBtn.disabled = true;
+                toggleCameraBtn.textContent = 'Ligar Câmara';
+                toggleCameraBtn.classList.replace('bg-red-600', 'bg-indigo-600');
+                videoContainer.classList.add('placeholder');
+            }
+        }
+        
+        function handleCameraError(error) {
+             console.error('Erro ao aceder à câmara:', error);
+            if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+                updateStatus('Acesso à câmara negado. Verifique as permissões do navegador.', false);
+            } else {
+                updateStatus('Não foi possível aceder à câmara.', false);
+            }
+            stopCamera();
         }
 
         toggleCameraBtn.addEventListener('click', () => {
             if (isCameraOn) {
                 stopCamera();
             } else {
-                startCamera();
+                startCamera(videoDevices[currentDeviceIndex]?.deviceId);
             }
         });
 
+        switchCameraBtn.addEventListener('click', () => {
+            if (videoDevices.length > 1) {
+                currentDeviceIndex = (currentDeviceIndex + 1) % videoDevices.length;
+                startCamera(videoDevices[currentDeviceIndex].deviceId);
+            }
+        });
+
+        // --- Funções de OCR e Processamento de Endereços ---
         scanBtn.addEventListener('click', async () => {
             if (!isCameraOn || !worker) return;
 
@@ -160,7 +204,7 @@
             const context = canvas.getContext('2d');
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
             
-            updateStatus('Iniciando escaneamento...', true);
+            updateStatus('A iniciar digitalização...', true);
 
             try {
                 const { data: { text } } = await worker.recognize(canvas);
@@ -171,7 +215,7 @@
                     updateStatus(`Endereço adicionado: ${parsedAddress.street}, ${parsedAddress.number}`, false);
                     setTimeout(() => statusSection.classList.add('hidden'), 2500);
                 } else {
-                    updateStatus('Nenhum endereço válido encontrado. Tente novamente com melhor iluminação ou foco.', false);
+                    updateStatus('Nenhum endereço válido encontrado. Tente novamente.', false);
                     console.warn("Texto reconhecido:", text);
                 }
             } catch (error) {
@@ -197,11 +241,10 @@
             statusText.textContent = message;
             spinner.classList.toggle('hidden', !showSpinner);
         }
-        
+
         function addAddress(street, number) {
             const normalizedStreet = street.trim();
             const streetNumber = parseInt(number, 10);
-
             if (!addresses.has(normalizedStreet)) {
                 addresses.set(normalizedStreet, new Set());
             }
@@ -211,83 +254,43 @@
 
         function renderAddressList() {
             addressListDiv.innerHTML = '';
-
             if (addresses.size === 0) {
-                addressListDiv.appendChild(emptyListMsg);
-                emptyListMsg.classList.remove('hidden');
+                addressListDiv.innerHTML = '<p id="empty-list-msg" class="text-gray-500">Nenhum endereço na lista ainda.</p>';
                 return;
             }
-            
-            emptyListMsg.classList.add('hidden');
 
-            const sortedStreets = [...addresses.keys()].sort();
+            const sortedStreets = [...addresses.keys()].sort((a,b) => a.localeCompare(b));
 
             sortedStreets.forEach(street => {
                 const numbers = [...addresses.get(street)].sort((a, b) => a - b);
-                
                 const streetContainer = document.createElement('div');
                 streetContainer.className = 'p-4 border rounded-lg bg-gray-50';
-
-                const headerDiv = document.createElement('div');
-                headerDiv.className = 'flex justify-between items-center mb-2';
                 
-                const streetTitle = document.createElement('h3');
-                streetTitle.className = 'text-lg font-semibold text-indigo-700 cursor-pointer';
-                streetTitle.textContent = street;
-                streetTitle.onclick = () => editStreet(street);
-                
-                const deleteStreetBtn = createDeleteButton(() => {
-                    if (confirm(`Tem certeza que deseja remover a rua "${street}" e todos os seus números?`)) {
-                        addresses.delete(street);
-                        renderAddressList();
-                    }
-                }, "Remover rua");
-
-                headerDiv.appendChild(streetTitle);
-                headerDiv.appendChild(deleteStreetBtn);
-
-                const numbersList = document.createElement('ul');
-                numbersList.className = 'flex flex-wrap gap-2';
-
-                numbers.forEach(number => {
-                    const numberItem = document.createElement('li');
-                    numberItem.className = 'flex items-center gap-1 bg-white border border-gray-300 rounded-full py-1 px-3 text-sm';
-                    
-                    const numberSpan = document.createElement('span');
-                    numberSpan.className = 'cursor-pointer';
-                    numberSpan.textContent = number;
-                    numberSpan.onclick = () => editNumber(street, number);
-
-                    const deleteNumberBtn = createDeleteButton(() => {
-                        addresses.get(street).delete(number);
-                        if (addresses.get(street).size === 0) {
-                            addresses.delete(street);
-                        }
-                        renderAddressList();
-                    }, "Remover número");
-                    deleteNumberBtn.className = 'w-4 h-4 text-gray-400 hover:text-red-500';
-
-                    numberItem.appendChild(numberSpan);
-                    numberItem.appendChild(deleteNumberBtn);
-                    numbersList.appendChild(numberItem);
-                });
-
-                streetContainer.appendChild(headerDiv);
-                streetContainer.appendChild(numbersList);
+                streetContainer.innerHTML = `
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-lg font-semibold text-indigo-700 cursor-pointer" onclick="editStreet('${street}')">${street}</h3>
+                        <button title="Remover rua" class="text-gray-500 hover:text-red-600 transition-colors" onclick="deleteStreet('${street}')">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg>
+                        </button>
+                    </div>
+                    <ul class="flex flex-wrap gap-2">
+                        ${numbers.map(number => `
+                            <li class="flex items-center gap-1 bg-white border border-gray-300 rounded-full py-1 px-3 text-sm">
+                                <span class="cursor-pointer" onclick="editNumber('${street}', ${number})">${number}</span>
+                                <button title="Remover número" class="w-4 h-4 text-gray-400 hover:text-red-500" onclick="deleteNumber('${street}', ${number})">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg>
+                                </button>
+                            </li>
+                        `).join('')}
+                    </ul>
+                `;
                 addressListDiv.appendChild(streetContainer);
             });
         }
         
-        function createDeleteButton(onClick, title) {
-            const button = document.createElement('button');
-            button.title = title;
-            button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg>`;
-            button.className = 'text-gray-500 hover:text-red-600 transition-colors';
-            button.onclick = onClick;
-            return button;
-        }
+        // --- Funções de Edição e Remoção ---
         
-        function editStreet(oldStreet) {
+        window.editStreet = (oldStreet) => {
             const newStreet = prompt("Editar nome da rua:", oldStreet);
             if (newStreet && newStreet.trim() !== '' && newStreet !== oldStreet) {
                 const numbers = addresses.get(oldStreet);
@@ -295,9 +298,9 @@
                 addresses.set(newStreet.trim(), numbers);
                 renderAddressList();
             }
-        }
+        };
 
-        function editNumber(street, oldNumber) {
+        window.editNumber = (street, oldNumber) => {
             const newNumberStr = prompt(`Editar número para a rua "${street}":`, oldNumber);
             const newNumber = parseInt(newNumberStr, 10);
             if (newNumberStr && !isNaN(newNumber) && newNumber !== oldNumber) {
@@ -306,11 +309,26 @@
                  numbers.add(newNumber);
                  renderAddressList();
             }
-        }
+        };
+
+        window.deleteStreet = (street) => {
+            if(confirm(`Tem a certeza de que deseja remover a rua "${street}" e todos os seus números?`)){
+                addresses.delete(street);
+                renderAddressList();
+            }
+        };
+
+        window.deleteNumber = (street, number) => {
+            addresses.get(street).delete(number);
+            if (addresses.get(street).size === 0) {
+                addresses.delete(street);
+            }
+            renderAddressList();
+        };
+
     </script>
 </body>
 </html>
-    
-  </body>
-  
-</html>
+
+
+
